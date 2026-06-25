@@ -26,6 +26,7 @@ class Task(BaseModel):
 
 tasks : dict[int : Task] = {}
 next_id : int = 1
+MAX_TASKS : int = 100
 
 
 
@@ -37,6 +38,10 @@ async def health() -> dict[str, str]:
 @app.post('/tasks', response_model=Task)
 async def create_task(payload : TaskCreate) -> Task:
     global next_id
+
+    if len(tasks) >= MAX_TASKS:
+        raise HTTPException(status_code=409, detail="Too many tasks")
+
     task = Task(
         id=next_id,
         title=payload.title,
