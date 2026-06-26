@@ -21,7 +21,7 @@ class Task(BaseModel):
     id: int
     title: str
     description: str
-    completed: bool = False
+    done: bool = False
 
 
 tasks : dict[int : Task] = {}
@@ -91,3 +91,6 @@ async def delete_task(task_id: int) -> None:
 async def slow_endpoint():
     await asyncio.sleep(1)
     return {"message": "done"}
+
+
+
