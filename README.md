@@ -43,7 +43,7 @@ uvicorn app.main:app --reload
 
 ## Скриншот
 
-![Gradio-интерфейс](screenshots/06_gradio_blocks_with_examples.png)
+![Gradio-интерфейс](screenshots\10_public_url.jpg)
 
 ## Стек
 
