@@ -6,10 +6,19 @@ on:
   pull_request:
     branches: [ main ]
 
-jobs:                         # ← ДОБАВИЛ
-  build-and-push:             # job №2 — собрать образ и (только с main) залить его в GHCR
+jobs:
+  test:                         # ← ДОБАВИТЬ ЭТУ JOB
     runs-on: ubuntu-latest
-    needs: test               # стартует только если тесты прошли
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          # здесь ваши команды для тестов
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
 
