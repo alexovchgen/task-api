@@ -1,114 +1,54 @@
-import asyncio
-import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import joblib
+import pandas as pd
+from fastapi import FastAPI, Request
+
+from app.schemas.predict import PredictRequest, PredictResponse
 
 
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
-
-from app.core.config import settings
-from app.core.logging import setup_logging
-
-setup_logging(settings.log_level)
-logger = logging.getLogger(__name__)
-
-
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    debug=settings.debug,
-)
+MODEL_PATH = Path("models/wine_model.pkl")
+CLASS_NAMES = ["class_0", "class_1", "class_2"]
+FEATURE_ORDER = [
+    "alcohol", "malic_acid", "ash", "alcalinity_of_ash", "magnesium",
+    "total_phenols", "flavanoids", "nonflavanoid_phenols",
+    "proanthocyanins", "color_intensity", "hue",
+    "od280/od315_of_diluted_wines", "proline",
+]
 
 
-class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    description : str = Field(default="", max_length=2000)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Грузим модель один раз при старте
+    app.state.model = joblib.load(MODEL_PATH)
+    yield
+    # Тут можно было бы закрыть коннекшены к БД, но у нас их нет
 
 
-class TaskUpdate(BaseModel):
-    title : str | None = Field(default=None, min_length=1, max_length=200)
-    description : str | None = Field(default=None, max_length=2000)
-    done : bool | None = None
+app = FastAPI(lifespan=lifespan)
 
 
-class Task(BaseModel):
-    id: int
-    title: str
-    description: str
-    done: bool = False
-
-
-tasks : dict[int : Task] = {}
-next_id : int = 1
-MAX_TASKS : int = 100
-
-
-
-@app.get('/health')
-async def health() -> dict[str, str]:
-    logger.info("health check called")
+@app.get("/health")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post('/tasks', response_model=Task)
-async def create_task(payload : TaskCreate) -> Task:
-    global next_id
+@app.post("/predict", response_model=PredictResponse)
+def predict(req: PredictRequest, request: Request) -> PredictResponse:
+    model = request.app.state.model
 
-    if len(tasks) >= MAX_TASKS:
-        raise HTTPException(status_code=409, detail="Too many tasks")
+    # Превращаем Pydantic-объект в DataFrame с теми же именами колонок,
+    # которые модель видела на обучении. by_alias=True вернёт
+    # оригинальное имя od280/od315_of_diluted_wines со слэшем.
+    row = pd.DataFrame([req.model_dump(by_alias=True)])
+    row = row[FEATURE_ORDER]
 
-    task = Task(
-        id=next_id,
-        title=payload.title,
-        description=payload.description,
-        done = False
+    proba = model.predict_proba(row)[0]
+    pred_idx = int(proba.argmax())
+
+    return PredictResponse(
+        predicted_class=CLASS_NAMES[pred_idx],
+        probabilities={CLASS_NAMES[i]: float(round(p, 4)) for i, p in enumerate(proba)},
     )
-
-    tasks[task.id] = task   
-    next_id += 1
-    return task
-
-
-@app.get('/tasks', response_model=list[Task])
-async def list_tasks() -> list[Task]:
-    return list(tasks.values())
-
-
-@app.get('/tasks/{task_id}', response_model=Task)
-async def get_task(task_id: int) -> Task:
-    task = tasks.get(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
-
-
-@app.patch('/tasks/{task_id}', response_model=Task)
-async def update_task(task_id: int, payload: TaskUpdate) -> Task:
-    task = tasks.get(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    updated = task.model_copy(
-        update={ k : v for k, v in payload.model_dump().items() if v is not None }
-    )
-    tasks[task_id] = updated
-    return updated
-
-
-@app.delete('/tasks/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: int) -> None:
-    if task_id not in tasks:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    del tasks[task_id]
-    return None
-
-
-@app.get('/slow')
-async def slow_endpoint():
-    await asyncio.sleep(1)
-    return {"message": "done"}
-
-
-@app.get("/version")
-async def version() -> dict[str, str]:
-    return {"version": settings.app_version}
 
